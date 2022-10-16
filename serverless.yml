@@ -12,6 +12,9 @@ provider:
     GROUP_TABLE: Group-Dynamo-Dev
     IMAGE_TABLE: Image-Dynamo-Dev
     IMAGE_INDEX: ImageIdIndex
+    IMAGE_BUCKET: kehindebello-serverless-bucket15
+    SIGNED_URL_EXPIRATION: 300
+
   iamRoleStatements:
     - Effect: Allow
       Action: 
@@ -25,11 +28,17 @@ provider:
     - Effect: Allow
       Action:
         - dynamoDB:Query
+        - dynamoDB:PutItem
       Resource: "arn:aws:dynamodb:us-east-1:008835207666:table/Image-Dynamo-Dev"
     - Effect: Allow 
       Action:
         - dynamoDB:Query
       Resource: "arn:aws:dynamodb:us-east-1:008835207666:table/Image-Dynamo-Dev/index/ImageIdIndex"
+    - Effect: Allow
+      Action:
+        - 's3:PutObject'
+        - 's3:GetObject'
+      Resource: "arn:aws:s3:::${self:provider.environment.IMAGE_BUCKET}/*"
 
 functions:
   getGroups:
@@ -60,13 +69,25 @@ functions:
           method: GET
           path: /images/{imageId}
           cors: true
+  createImage:
+    handler: lambda/createImages/.handler
+    events:
+      - http:
+          method: POST
+          path: /groups/{groupId}/images
+          cors: true
+  SendUploadNotifications:
+    handler: lambda/s3/sendNotifications/.handler
+    events:
+      - s3:
+          bucket: ${self:provider.environment.IMAGE_BUCKET}
+          event: s3:ObjectCreated:*
+          existing: true
+  
+
 
 resources:
   Resources:
-    DemoBucketUpload:
-     Type: AWS::S3::Bucket
-     Properties:
-       BucketName: kehindebello-serverless-bucket15
     GroupsDynamoDB:
       Type: AWS::DynamoDB::Table
       Properties:
@@ -102,3 +123,42 @@ resources:
           Projection:
             ProjectionType: ALL
         BillingMode: PAY_PER_REQUEST
+
+    ImagesS3Bucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: ${self:provider.environment.IMAGE_BUCKET}
+        NotificationConfiguration:
+          LambdaConfigurations:
+          - Event: s3:ObjectCreated:*
+            Function: !GetAtt SendUploadNotificationsLambdaFunction.Arn
+
+        CorsConfiguration:
+          CorsRules:
+            - AllowedOrigins: ['*']
+              AllowedHeaders: ['*']
+              AllowedMethods: [GET, POST, PUT, DELETE, HEAD] 
+              MaxAge: 3000
+    
+    SendUploadNotificationsPermission:
+      Type: AWS::Lambda::Permission
+      Properties:
+        FunctionName: arn:aws:lambda:us-east-1:008835207666:function:aws-serverless-dev-SendUploadNotifications
+        Principal: s3.amazonaws.com
+        Action: lambda:InvokeFunction
+        SourceAccount: !Ref AWS::AccountId
+        SourceArn: arn:aws:s3:::${self:provider.environment.IMAGE_BUCKET}
+    
+    BucketPolicy:
+      Type: AWS::S3::BucketPolicy
+      Properties:
+        PolicyDocument:
+          Id: MyPolicy
+          Version: "2012-10-17"
+          Statement:
+            - Sid: PublicReadForGetBucketObjects
+              Effect: Allow
+              Principal: '*'
+              Action: 's3:GetObject'
+              Resource: 'arn:aws:s3:::${self:provider.environment.IMAGE_BUCKET}/*'
+        Bucket: !Ref ImagesS3Bucket
