@@ -13,6 +13,7 @@ provider:
     IMAGE_TABLE: Image-Dynamo-Dev
     IMAGE_INDEX: ImageIdIndex
     IMAGE_BUCKET: kehindebello-serverless-bucket15
+    CONNECTIONS_TABLE: Connections-dev
     SIGNED_URL_EXPIRATION: 300
 
   iamRoleStatements:
@@ -39,6 +40,12 @@ provider:
         - 's3:PutObject'
         - 's3:GetObject'
       Resource: "arn:aws:s3:::${self:provider.environment.IMAGE_BUCKET}/*"
+    - Effect: Allow
+      Action:
+        - dynamoDB:Scan
+        - dynamoDB:PutItem
+        - dynamoDB:DeleteItem
+      Resource: "arn:aws:dynamodb:us-east-1:008835207666:table/${self:provider.environment.CONNECTIONS_TABLE}"
 
 functions:
   getGroups:
@@ -83,7 +90,20 @@ functions:
           bucket: ${self:provider.environment.IMAGE_BUCKET}
           event: s3:ObjectCreated:*
           existing: true
-  
+    environment:
+      STAGE: dev
+      API_ID:
+        Ref: WebsocketsApi
+  ConnectHandler:
+    handler: lambda/websocket/connect/.handler
+    events:
+      - websocket:
+          route: $connect
+  DisconnectHandler:
+    handler: lambda/websocket/disconnect/.handler
+    events:
+      - websocket:
+          route: $disconnect
 
 
 resources:
@@ -162,3 +182,15 @@ resources:
               Action: 's3:GetObject'
               Resource: 'arn:aws:s3:::${self:provider.environment.IMAGE_BUCKET}/*'
         Bucket: !Ref ImagesS3Bucket
+      
+    WebSocketConnectionTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:provider.environment.CONNECTIONS_TABLE}
+        AttributeDefinitions: 
+        - AttributeName: id
+          AttributeType: S
+        KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+        BillingMode: PAY_PER_REQUEST
